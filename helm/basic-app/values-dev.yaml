@@ -1,0 +1,13 @@
+replicaCount: 1
+
+image:
+  repository: 447182646004.dkr.ecr.us-east-1.amazonaws.com/basic-app
+  tag: dev
+
+ingress:
+  host: dev.myapp.local
+  albName: dev-alb
+
+autoscaling:
+  minReplicas: 1
+  maxReplicas: 2

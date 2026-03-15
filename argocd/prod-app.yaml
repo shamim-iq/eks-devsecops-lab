@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: basic-app-prod
+  namespace: argocd
+
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/shamim-iq/eks-devsecops-lab
+    targetRevision: main
+    path: helm/basic-app
+    helm:
+      valueFiles:
+      - values-prod.yaml
+#Unlike Dev, auto sync is disabled.
+#Production deployment(via argoCD) requires a manual trigger or CI/CD approval step.
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: prod

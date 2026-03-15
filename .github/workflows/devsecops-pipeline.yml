@@ -1,0 +1,179 @@
+name: DevSecOps Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: write
+
+env:
+  AWS_REGION: us-east-1
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+
+# -----------------------------
+# JOB 1 — BUILD + SAST
+# -----------------------------
+
+  build-and-scan:
+
+    runs-on: ubuntu-latest
+
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+
+    steps:
+
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Configure AWS Credentials via OIDC
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: arn:aws:iam::447182646004:role/GitHubActionsDevSecOpsRole
+        aws-region: ${{ env.AWS_REGION }}
+
+    # -----------------------------------
+    # Retrieve secrets from Secrets Manager
+    # -----------------------------------
+
+    - name: Retrieve Secrets from AWS Secrets Manager
+      run: |
+
+        SONAR_TOKEN=$(aws secretsmanager get-secret-value \
+          --secret-id sonar-token \
+          --query SecretString \
+          --output text)
+
+        SONAR_HOST=$(aws secretsmanager get-secret-value \
+          --secret-id sonar-host \
+          --query SecretString \
+          --output text)
+
+        echo "SONAR_TOKEN=$SONAR_TOKEN" >> $GITHUB_ENV
+        echo "SONAR_HOST=$SONAR_HOST" >> $GITHUB_ENV
+
+    # -----------------------------------
+    # Python setup
+    # -----------------------------------
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install Dependencies
+      run: |
+        pip install -r app/requirements.txt
+
+    # -----------------------------------
+    # SAST Scan
+    # -----------------------------------
+
+    - name: SonarQube Scan
+      uses: SonarSource/sonarqube-scan-action@v2
+      env:
+        SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
+        SONAR_HOST_URL: ${{ env.SONAR_HOST }}
+
+    # -----------------------------------
+    # Docker Build
+    # -----------------------------------
+
+    - name: Get AWS Account ID
+      id: aws-account
+      run: |
+        ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+        echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
+
+    - name: Set ECR Registry
+      run: |
+        echo "ECR_REGISTRY=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com" >> $GITHUB_ENV
+
+    - name: Login to Amazon ECR
+      run: |
+        aws ecr get-login-password --region $AWS_REGION \
+        | docker login \
+        --username AWS \
+        --password-stdin $ECR_REGISTRY
+
+    - name: Build Docker Image
+      run: |
+        docker build \
+        -t $ECR_REGISTRY/basic-app:$IMAGE_TAG \
+        ./app
+
+    - name: Push Image to ECR
+      run: |
+        docker push $ECR_REGISTRY/basic-app:$IMAGE_TAG
+
+    # -----------------------------------
+    # Update Helm Dev Tag (GitOps trigger)
+    # -----------------------------------
+
+    - name: Update Helm Dev Image Tag
+      run: |
+        sed -i "s/tag:.*/tag: $IMAGE_TAG/" helm/basic-app/values-dev.yaml
+
+    - name: Commit Helm Dev Update
+      run: |
+        git config --global user.name "github-actions"
+        git config --global user.email "ci@github.com"
+
+        git add helm/basic-app/values-dev.yaml
+
+        git commit -m "Update dev image tag $IMAGE_TAG [skip ci]" || echo "No changes"
+
+        git push
+
+# ---------------------------------
+# JOB 2 — DAST Scan
+# ---------------------------------
+
+  dast-scan:
+
+    needs: build-and-scan
+    runs-on: ubuntu-latest
+
+    steps:
+
+    - name: OWASP ZAP Baseline Scan
+      uses: zaproxy/action-baseline@v0.10.0
+      with:
+        target: http://dev.myapp.local
+
+# ---------------------------------
+# JOB 3 — Production Promotion
+# ---------------------------------
+
+  deploy-prod:
+
+    needs: dast-scan
+    runs-on: ubuntu-latest
+
+    environment:
+      name: production
+
+    steps:
+
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Update Helm Prod Image Tag
+      run: |
+        sed -i "s/tag:.*/tag: $IMAGE_TAG/" helm/basic-app/values-prod.yaml
+
+    - name: Commit Production Promotion
+      run: |
+
+        git config --global user.name "github-actions"
+        git config --global user.email "ci@github.com"
+
+        git add helm/basic-app/values-prod.yaml
+
+        git commit -m "Promote image $IMAGE_TAG to production [skip ci]" || echo "No changes"
+
+        git push

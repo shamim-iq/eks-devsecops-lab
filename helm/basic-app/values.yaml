@@ -1,0 +1,29 @@
+replicaCount: 2
+
+image:
+  repository: 447182646004.dkr.ecr.us-east-1.amazonaws.com/basic-app
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  port: 80
+  targetPort: 8080
+
+ingress:
+  enabled: true
+  className: alb
+  scheme: internet-facing
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  cpuUtilization: 60
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 256Mi

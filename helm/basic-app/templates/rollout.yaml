@@ -1,0 +1,55 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: basic-app
+spec:
+  replicas: {{ .Values.replicaCount }}
+
+  strategy:
+    blueGreen:
+      activeService: basic-app-active
+      previewService: basic-app-preview
+      autoPromotionEnabled: false
+
+  selector:
+    matchLabels:
+      app: basic-app
+
+  template:
+    metadata:
+      labels:
+        app: basic-app
+
+    spec:
+      serviceAccountName: basic-app-sa
+
+      initContainers:
+      - name: init-config
+        image: busybox
+        command:
+        - sh
+        - -c
+        - echo "Preparing application environment"
+
+      containers:
+      - name: basic-app
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        ports:
+        - containerPort: 8080
+
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 20
+          periodSeconds: 10
+
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}

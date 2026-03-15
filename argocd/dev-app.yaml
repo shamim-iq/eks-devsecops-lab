@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: basic-app-dev
+  namespace: argocd
+
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/shamim-iq/eks-devsecops-lab
+    targetRevision: main
+    path: helm/basic-app
+    helm:
+      valueFiles:
+      - values-dev.yaml
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: dev
+# syncPolicy will automatically update the cluster with the app changes in the dev namespace.
+# Once tested and approved from dev, the final app will be promoted to prod.
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

@@ -1,0 +1,13 @@
+replicaCount: 3
+
+image:
+  repository: 447182646004.dkr.ecr.us-east-1.amazonaws.com/basic-app
+  tag: prod
+
+ingress:
+  host: prod.myapp.local
+  albName: prod-alb
+
+autoscaling:
+  minReplicas: 3
+  maxReplicas: 6
