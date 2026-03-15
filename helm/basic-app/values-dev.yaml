@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository: 447182646004.dkr.ecr.us-east-1.amazonaws.com/basic-app
-  tag: 97351bb76c6d66a3d7fec26896d02ebe3e46a8c8
+  tag: cf2923f89bd7745edd7875693847a9ca5f095a57
 
 ingress:
   host: dev.myapp.local
