@@ -7,6 +7,12 @@ metadata:
 spec:
   project: default
 
+# Optionally added auto sync 
+  syncPolicy:
+  automated:
+    prune: true
+    selfHeal: true
+
   source:
     repoURL: https://github.com/shamim-iq/eks-devsecops-lab
     targetRevision: main
