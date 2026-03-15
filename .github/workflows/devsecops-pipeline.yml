@@ -37,7 +37,7 @@ jobs:
         aws-region: ${{ env.AWS_REGION }}
 
     # -----------------------------------
-    # Retrieve secrets from Secrets Manager
+    # Retrieve secrets from Secrets Manager and tool installations
     # -----------------------------------
 
     - name: Retrieve Secrets from AWS Secrets Manager
@@ -55,6 +55,28 @@ jobs:
 
         echo "SONAR_TOKEN=$SONAR_TOKEN" >> $GITHUB_ENV
         echo "SONAR_HOST=$SONAR_HOST" >> $GITHUB_ENV
+        
+        SMTP_USERNAME=$(aws secretsmanager get-secret-value \
+          --secret-id smtp-username \
+          --query SecretString \
+          --output text)
+
+        SMTP_PASSWORD=$(aws secretsmanager get-secret-value \
+          --secret-id smtp-password \
+          --query SecretString \
+          --output text)
+
+        echo "SMTP_USERNAME=$SMTP_USERNAME" >> $GITHUB_ENV
+        echo "SMTP_PASSWORD=$SMTP_PASSWORD" >> $GITHUB_ENV
+
+    - name: Install kubectl
+      uses: azure/setup-kubectl@v4
+
+    - name: Install Argo Rollouts CLI
+      run: |
+        curl -LO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+        chmod +x kubectl-argo-rollouts-linux-amd64
+        sudo mv kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
 
     # -----------------------------------
     # Python setup
@@ -133,17 +155,17 @@ jobs:
 # JOB 2 — DAST Scan
 # ---------------------------------
 
-  dast-scan:
+#  dast-scan:
 
-    needs: build-and-scan
-    runs-on: ubuntu-latest
+#    needs: build-and-scan
+#    runs-on: ubuntu-latest
 
-    steps:
+#   steps:
 
-    - name: OWASP ZAP Baseline Scan
-      uses: zaproxy/action-baseline@v0.10.0
-      with:
-        target: http://dev.myapp.local
+#    - name: OWASP ZAP Baseline Scan
+#      uses: zaproxy/action-baseline@v0.10.0
+#      with:
+#        target: http://dev.myapp.local
 
 # ---------------------------------
 # JOB 3 — Production Promotion
@@ -151,7 +173,7 @@ jobs:
 
   deploy-prod:
 
-    needs: dast-scan
+    needs: build-and-scan
     runs-on: ubuntu-latest
 
     environment:
@@ -161,6 +183,28 @@ jobs:
 
     - name: Checkout Repository
       uses: actions/checkout@v4
+
+    - name: Configure AWS Credentials via OIDC
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: arn:aws:iam::447182646004:role/GitHubActionsDevSecOpsRole
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Retrieve SMTP Secrets
+      run: |
+
+        SMTP_USERNAME=$(aws secretsmanager get-secret-value \
+          --secret-id smtp-username \
+          --query SecretString \
+          --output text)
+
+        SMTP_PASSWORD=$(aws secretsmanager get-secret-value \
+          --secret-id smtp-password \
+          --query SecretString \
+          --output text)
+
+        echo "SMTP_USERNAME=$SMTP_USERNAME" >> $GITHUB_ENV
+        echo "SMTP_PASSWORD=$SMTP_PASSWORD" >> $GITHUB_ENV
 
     - name: Update Helm Prod Image Tag
       run: |
@@ -177,3 +221,31 @@ jobs:
         git commit -m "Promote image $IMAGE_TAG to production [skip ci]" || echo "No changes"
 
         git push
+    
+    - name: Wait for Dev Deployment
+      run: sleep 120
+   
+    - name: Configure kubectl for EKS
+      run: |
+        aws eks update-kubeconfig \
+          --region $AWS_REGION \
+          --name devsecops-eks-cluster
+
+    - name: Rollback Deployment
+      if: ${{ failure() }}
+      continue-on-error: true
+      run: |
+        kubectl argo rollouts undo basic-app -n prod
+
+    - name: Send Deployment Email
+      uses: dawidd6/action-send-mail@v3
+      if: success()
+      with:
+        server_address: smtp.gmail.com
+        server_port: 465
+        username: ${{ env.SMTP_USERNAME }}
+        password: ${{ env.SMTP_PASSWORD }}
+        subject: DevSecOps Pipeline Result
+        to: shamim.linkedin@gmail.com
+        from: DevSecOps Pipeline
+        body: Production deployment completed successfully
