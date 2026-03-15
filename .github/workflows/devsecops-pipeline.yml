@@ -221,8 +221,9 @@ jobs:
 
         git commit -m "Promote image $IMAGE_TAG to production [skip ci]" || echo "No changes"
 
-        git push
-    
+        git pull --rebase origin main
+        git push origin main
+
     - name: Wait for Dev Deployment
       run: sleep 120
    
